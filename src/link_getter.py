@@ -32,6 +32,7 @@ class link_getter :
 
         with open('./test.json','w') as f:
             json.dump(_json, f, ensure_ascii=False, indent=4)
+
     
     def get_link_for_test(self):
         column = self.data_col_list[0]
