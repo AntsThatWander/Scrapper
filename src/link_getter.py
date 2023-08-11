@@ -33,6 +33,33 @@ class link_getter :
         with open('./test.json','w') as f:
             json.dump(_json, f, ensure_ascii=False, indent=4)
 
+
+    def get_link_by_naver_news(self):
+        _json = []
+        total_cnt = 0
+        for data_column in self.data_col_list:
+            data_rows = self.data[data_column].dropna(axis = 0).tolist()
+            for key in data_rows:
+
+                for i in range(7):
+                    url = self.base_url + key + self.sort + self.get_start(i)
+                    html = requests.get(url)
+                    soup = BeautifulSoup(html.text, 'html.parser')
+                    print(url)
+                
+                    for elem in soup.select('#main_pack > section > div > div.group_news > ul > li > div > div > div.news_info > div.info_group > a.info'):
+                        if(len(elem['class']) > 1) :
+                            continue
+                        total_cnt += 1
+                        link = elem['href']
+                        dictionary = {f"{total_cnt}" :  link}
+                        _json.append(dictionary)
+                    
+                    time.sleep(0.5)
+            
+        with open('./naver_news.json','w') as f:
+            json.dump(_json, f, ensure_ascii=False, indent=4)
+
     
     def get_link_for_test(self):
         column = self.data_col_list[0]
@@ -63,4 +90,4 @@ class link_getter :
     #     pass
 
 lg = link_getter()
-lg.get_link_for_test()
+lg.get_link_by_naver_news()
