@@ -33,6 +33,21 @@ class link_getter :
         with open('./test.json','w') as f:
             json.dump(_json, f, ensure_ascii=False, indent=4)
     
+    def get_link_for_test(self):
+        column = self.data_col_list[0]
+        rows = self.data[column].dropna(axis = 0).tolist()
+
+        key = rows[0]
+        print(key)
+        url = self.base_url + key + self.sort + self.get_start(0)
+        html = requests.get(url)
+        soup = BeautifulSoup(html.text, 'html.parser')
+
+        cnt = 0
+        for elem in soup.select('#main_pack > section > div > div.group_news > ul > li > div > div'):
+            print(f"{cnt+1} : {elem.select('a.news_tit')}\n")
+            print(f"{cnt+1}-1 : {elem.select('div > div.info_group > a')}\n")
+            cnt += 1
     
 
         
