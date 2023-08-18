@@ -38,6 +38,17 @@ class Handler:
         _get_user_agent()
         request = Request(url, None, self.headers)
         return urlopen(request).read().decode('utf-8')
+    
+    def get_new_ip(self, wait_time):
+        pass
+
+    
+    @staticmethod
+    def renew_connection():
+        with Controller.from_port(port=9051) as controller:
+            controller.authenticate(password='btt')
+            controller.signal(Signal.NEWNYM)
+            controller.close()
 
 class link_getter :
     # selectors per site to get links. Choose one where you want to get links.
@@ -50,63 +61,61 @@ class link_getter :
 
     def __init__(self, excel_name = "word_list.csv"):
         self.data_src = pd.read_csv(excel_name)['word'].tolist()
-        self._json = []
+        self.output_data = []
         self.total_cnt = 0
         self.tor_handler = Handler()
 
     #If you meet an error while crawling, you can get json.
     def get_json(self) :
-        return self._json
+        return self.output_data
     
-    def init_json(self, json : List[str], total_cnt : int):
-        self._json = json
+    def init_json(self, output_data : List[str], total_cnt : int) -> List[dict]:
+        self.output_data = output_data
         self.total_cnt = total_cnt
 
-    def get_link(self, file_name : str, 
+    def link_to_json(self, file_name : str, 
                         data_prsv_flag : bool,
-                        data : Optional[List[str]] = None, 
-                        url : Optional[str] = None,
+                        input_data : Optional[List[str]] = None, 
+                        base_url : Optional[str] = None,
                         selector : Optional[str] = None,
                         start_date : Optional[dt.date] = None,
                         end_date : Optional[dt.date] = None,
-                        repeat  : Optional[int] = None):
+                        total_page  : Optional[int] = None):
         
-        _repeat = 400 if repeat is None else repeat if repeat <= 400 else 400
-        _data = self.data_src if data is None else data
-        _cur_date = start_date if start_date is not None else dt.date.today()
-        _end_date = dt.date(_cur_date.year, _cur_date.month-1, _cur_date.day-1) if end_date is None else dt.date(end_date.year, end_date.month, end_date.day-1)
-        base_url = url if url is not None else link_getter.site.get('naver').get('url')
+        #init data for the function.
+        self._data_from_json(file_name, data_prsv_flag)
+        _total_page = 400 if total_page is None else total_page if total_page <= 400 else 400
+        _input_data = self.data_src if input_data is None else input_data
+        _start_date = start_date if start_date is not None else dt.date.today()
+        _end_date = dt.date(_start_date.year, _start_date.month-1, _start_date.day-1) if end_date is None else dt.date(end_date.year, end_date.month, end_date.day-1)
+        
+        _base_url = base_url if base_url is not None else link_getter.site.get('naver').get('url')
         _selector = selector if selector is not None else link_getter.site.get('naver').get('selector')
-        self._from_json(file_name, data_prsv_flag)
 
-        for key in _data:
-            try : 
-                print(f"{key} started") #print log. Erase it if you don't want any log
-
-                self._get_dict(base_url, key, _cur_date, _end_date, _repeat, _selector, file_name)
-
-                print(f"{key} ended") #print log. Erase it if you don't want any log
-            except HTTPError as hp:
-                print("You're currently blocked")
-                break
-                
-        self._to_json(file_name = file_name, json_file = self._json)
+        for key in _input_data:
+            print(f"{key} started") #print log. Erase it if you don't want any log
+            self._trip_per_date(key, _base_url, _start_date, _end_date, _total_page, _selector, file_name)
+            print(f"{key} ended") #print log. Erase it if you don't want any log
+         
+        return self.output_data
     
 
-    def _get_dict(self, base_url, key, _cur_date, _end_date, _repeat, _selector, file_name) :
-        while(_cur_date != _end_date) :
-                prev_date = _cur_date - dt.timedelta(days = 1)
-                for page_num in range(_repeat):
-                    try : # Need exception handling improvement.
-                        time.sleep(random.randrange(35,51)/100)
-                        cur_url =  self._get_url(base_url, key, page_num, '&sort=1', '&pd=3', f'&ds={_cur_date.strftime("%Y.%m.%d")}', f'&de={_cur_date.strftime("%Y.%m.%d")}') 
+    def _trip_per_date(self, key, _base_url, _start_date, _end_date, _total_page, _selector, file_name) :
+        cur_date = _start_date
+        while(cur_date != _end_date) :
+                prev_date = cur_date - dt.timedelta(days = 1)
+                for page in range(_total_page):
+                    try : 
+                        time.sleep(random.randrange(35, 55) / 100)
+                        cur_url =  self._create_url(_base_url, key, page, '&sort=1', '&pd=3', f'&ds={cur_date.strftime("%Y.%m.%d")}', f'&de={cur_date.strftime("%Y.%m.%d")}') 
                         html = self.tor_handler.open_url(cur_url)
                         soup = BeautifulSoup(html, 'html.parser')
                         print(cur_url) #print log. Erase it if you don't want any log
-                        self._get_page_data(soup, _selector)
+                        self._put_link_from_page_to_list(soup, _selector)
                     except HTTPError as hp:
                         print(hp)
                         if hp.__str__() == 'HTTP Error 403: Forbidden' :
+                            print("You're currently blocked")
                             raise hp
                         return None
                     except URLError as ue:
@@ -120,10 +129,11 @@ class link_getter :
                         print('error during html request & parsing')
                         print(ex)
                         return None
-                self._to_json(file_name, self._json)
-                _cur_date = prev_date
+                    
+                self._data_to_json(file_name)
+                cur_date = prev_date
     
-    def _get_page_data(self, soup, selector) :
+    def _put_link_from_page_to_list(self, soup, selector) :
         selected = soup.select(selector)
         if len(selected) == 0 :
             raise NoDataException('No more data found in this day')
@@ -134,24 +144,24 @@ class link_getter :
             self.total_cnt += 1
             link = elem['href']
             dictionary = {f'{self.total_cnt}' : link}
-            self._json.append(dictionary)
+            self.output_data.append(dictionary)
         
-    def _get_url(self, url : str, key : str, page_num : int, *args : str) :
+    def _create_url(self, url : str, key : str, page_num : int, *args : str) :
         params = ''
         for idx, arg in enumerate(args):
             params += arg
         return url + quote(key) + "&start=" + str(page_num * 10 + 1) + params
     
 
-    def _to_json(self, file_name : str, json_file : List[str]) :
+    def _data_to_json(self, file_name : str) :
         try:
             with open(file_name, 'w') as f:
-                json.dump(json_file, f, ensure_ascii=False, indent=4)
+                json.dump(self.output_data, f, ensure_ascii=False, indent=4)
         except IOError as IOex:
             print('error with opening', + str(file_name))
             print(IOex)
     
-    def _from_json(self, file_name : str, data_prsv_flag : bool) :
+    def _data_from_json(self, file_name : str, data_prsv_flag : bool) :
         if data_prsv_flag :
             try : 
                 with open(file_name, "r") as fd :
@@ -162,10 +172,10 @@ class link_getter :
                     self.init_json(_json, total_cnt)
             except IOError as fn :
                 print(fn)
-                print('No file found. Default Value Set.')
+                print('No file found. Use Default Dataset.')
             except NoDataException as fn :
                 print(fn)
-                print('Default Value Set.')
+                print('No data found in the file. Use Default Dataset.')
             finally :
                 self.init_json([], 0)
         else :
@@ -173,4 +183,4 @@ class link_getter :
 
 
 lg = link_getter()
-lg.get_link('to_Jinwoongdd.json', False)
+lg.link_to_json('to_Jinwoongdd.json', False)
