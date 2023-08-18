@@ -37,23 +37,25 @@ class link_getter :
     def get_json(self) :
         return self._json
     
-    def set_json_empty(self):
-        self._json = []
+    def init_json(self, json : List[str], total_cnt : int):
+        self._json = json
+        self.total_cnt = total_cnt
 
     def get_link(self, file_name : str, 
+                        data_prsv_flag : bool,
                         data : Optional[List[str]] = None, 
                         url : Optional[str] = None,
                         selector : Optional[str] = None,
                         start_date : Optional[dt.date] = None,
                         end_date : Optional[dt.date] = None,
                         repeat  : Optional[int] = None):
-        self.total_cnt = 0
         _repeat = 400 if repeat is None else repeat if repeat <= 400 else 400
         _data = self.data_src if data is None else data
         _cur_date = start_date if start_date is not None else dt.date.today()
         _end_date = dt.date(_cur_date.year, _cur_date.month-1, _cur_date.day-1) if end_date is None else dt.date(end_date.year, end_date.month, end_date.day)
         base_url = url if url is not None else link_getter.site.get('naver').get('url')
         _selector = selector if selector is not None else link_getter.site.get('naver').get('selector')
+        self._from_json(file_name, data_prsv_flag)
         
         for key in _data:
             print(f"{key} started") #print log. Erase it if you don't want any log
@@ -127,6 +129,21 @@ class link_getter :
         except IOError as IOex:
             print('error with opening', + str(file_name))
             print(IOex)
+    
+    def _from_json(self, file_name : str, data_prsv_flag : bool) :
+        if data_prsv_flag :
+            try : 
+                with open(file_name, "r") as fd :
+                    _json = json.load(fd)
+                    total_cnt = int(list(_json[len(_json) - 1].keys())[0])
+                    self.init_json(_json, total_cnt)
+            except IOError as fn :
+                print('No file found. Default Value Set.')
+                self.init_json([], 0)
+        else :
+            self.init_json([], 0)
+
 
 lg = link_getter()
-lg.get_link('hmm.json')
+#lg.get_link('hmm.json', data = ['하나머트리얼즈', '하니웰스페셜티머터리얼스코리아(주)'])
+lg._from_json('hmm.json', True)
