@@ -35,7 +35,7 @@ class TorHandler:
 
         def _get_user_agent() :
             software_names = [SoftwareName.CHROME.value]
-            operating_systems = [OperatingSystem.WINDOWS.value, OperatingSystem.LINUX.value]   
+            operating_systems = [OperatingSystem.WINDOWS.value, OperatingSystem.LINUX.value, OperatingSystem.MAC_OS_X.value, OperatingSystem.MAC.value, OperatingSystem.UNIX.value]   
             user_agent_rotator = UserAgent(software_names=software_names, operating_systems=operating_systems, limit=100)
             # Get Random User Agent String.
             user_agent = user_agent_rotator.get_random_user_agent()
@@ -89,10 +89,7 @@ class link_getter :
     def init_json(self, output_data : List[str], total_cnt : int) -> List[dict]:
         self.output_data = output_data
         self.total_cnt = total_cnt
-        print(f'{self.output_data} and {self.total_cnt}')
     
-    
-
     def link_to_json(self, file_name : str, 
                         data_prsv_flag : bool,
                         input_data : Optional[List[str]] = None,
@@ -119,6 +116,7 @@ class link_getter :
 
         for key in _input_data:
             print(f"{key} started") #print log. Erase it if you don't want any log
+            self.tor_handler.get_new_ip(2)
             self._trip_per_date(key, _base_url, _start_date, _end_date, _toal_page_num, _selector, file_name)
             print(f"{key} ended") #print log. Erase it if you don't want any log
          
@@ -135,7 +133,7 @@ class link_getter :
                 for page in range(_toal_page_num):
                     page_cnt += 1
                     try : 
-                        time.sleep(random.randrange(35, 55) / 100)
+                        time.sleep(random.randrange(200,601) / 1000 * 0.47 + random.randrange(200,601) / 1000 * 0.53)
                         url =  self._create_url(_base_url, key, page, 
                                                     '&sort=1', '&pd=3', 
                                                     f'&ds={cur_date.strftime("%Y.%m.%d")}', 
@@ -161,17 +159,19 @@ class link_getter :
                                 try : 
                                     print("You're currently blocked")
                                     print(f'Your new ip : {self.tor_handler.get_new_ip(2)}')
+                                    print(f'In error, your url : {url}')
+                                    time.sleep(random.randrange(250,551) / 98 * 0.45 + random.randrange(280,521) / 102 * 0.55)
                                     html = self.tor_handler.open_url(url)
                                     soup = BeautifulSoup(html, 'html.parser')
                                     self._put_link_from_page_to_list(soup.select(_selector))
+                                    break
                                 except Exception as e:
+                                    print(f'error during blocked status : {e}')
                                     if e.__str__() == 'HTTP Error 403: Forbidden' :
+                                        print('Still blocked')
                                         continue
                                     else :
-                                        print(e)
-                                finally :
-                                    break
-                        else :
+                                        break
                             break
                     except URLError as ue:
                         print('wrong url')
@@ -196,11 +196,11 @@ class link_getter :
             # to get rid of class = 'info press'
             if len(elem['class']) > 1 :
                 continue
-            self.total_cnt += 1
             link = elem['href']
             if link in self.output_data_content :
                 continue
             self.output_data_content.append(link)
+            self.total_cnt += 1
             dictionary = {f'{self.total_cnt}' : link}
             self.output_data.append(dictionary)
             
@@ -258,4 +258,4 @@ class link_getter :
 
 
 lg = link_getter()
-lg.link_to_json('data_crawling.json', True, start_keyword = '(주)동광에스디')
+lg.link_to_json('data_crawling.json', True, start_keyword = '버슘머트리얼즈에스피씨코리아(유한)')
