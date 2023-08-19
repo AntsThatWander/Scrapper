@@ -12,7 +12,8 @@ from urllib.request import ProxyHandler, build_opener, install_opener, Request, 
 from urllib.parse import quote
 from random_user_agent.user_agent import UserAgent
 from random_user_agent.params import SoftwareName, OperatingSystem
-
+from stem import Signal
+from stem.control import Controller
 
 class NoDataException(Exception):
     def __init__(self, msg):
@@ -21,12 +22,17 @@ class NoDataException(Exception):
     def __str__(self):
         return self.msg
     
-class Handler:
+class TorHandler:
     def __init__(self):
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.9.0.7) Gecko/2009021910 Firefox/3.0.7'}
 
     def open_url(self, url : str):
+        def _set_url_proxy():
+            proxy_support = ProxyHandler({'http': '127.0.0.1:8118'})
+            opener = build_opener(proxy_support)
+            install_opener(opener)
+
         def _get_user_agent() :
             software_names = [SoftwareName.CHROME.value]
             operating_systems = [OperatingSystem.WINDOWS.value, OperatingSystem.LINUX.value]   
@@ -35,13 +41,22 @@ class Handler:
             user_agent = user_agent_rotator.get_random_user_agent()
             self.headers['User-Agent'] = user_agent
 
+        _set_url_proxy()
         _get_user_agent()
         request = Request(url, None, self.headers)
         return urlopen(request).read().decode('utf-8')
     
-    def get_new_ip(self, wait_time):
-        pass
-
+    def get_cur_ip(self) :
+        return self.open_url('http://icanhazip.com/')
+    
+    def get_new_ip(self, wait_time : int) -> str:
+        ip = self.get_cur_ip()
+        old_ip = ip
+        self.renew_connection()
+        while ip == old_ip:
+            time.sleep(wait_time)
+            ip = self.get_cur_ip() 
+        return ip.strip()
     
     @staticmethod
     def renew_connection():
@@ -61,9 +76,11 @@ class link_getter :
 
     def __init__(self, excel_name = "word_list.csv"):
         self.data_src = pd.read_csv(excel_name)['word'].tolist()
+        self.internal_data = []
         self.output_data = []
+        self.output_data_content = []
         self.total_cnt = 0
-        self.tor_handler = Handler()
+        self.tor_handler = TorHandler()
 
     #If you meet an error while crawling, you can get json.
     def get_json(self) :
@@ -72,20 +89,28 @@ class link_getter :
     def init_json(self, output_data : List[str], total_cnt : int) -> List[dict]:
         self.output_data = output_data
         self.total_cnt = total_cnt
+        print(f'{self.output_data} and {self.total_cnt}')
+    
+    
 
     def link_to_json(self, file_name : str, 
                         data_prsv_flag : bool,
-                        input_data : Optional[List[str]] = None, 
+                        input_data : Optional[List[str]] = None,
+                        start_keyword : Optional[str] = None,
                         base_url : Optional[str] = None,
                         selector : Optional[str] = None,
                         start_date : Optional[dt.date] = None,
                         end_date : Optional[dt.date] = None,
-                        total_page  : Optional[int] = None):
+                        toal_page_num  : Optional[int] = None):
         
         #init data for the function.
         self._data_from_json(file_name, data_prsv_flag)
-        _total_page = 400 if total_page is None else total_page if total_page <= 400 else 400
+        self._get_data_content()
+        _toal_page_num = 400 if toal_page_num is None else toal_page_num if toal_page_num <= 400 else 400
         _input_data = self.data_src if input_data is None else input_data
+        if start_keyword is not None :
+            _input_data = self._slice_data_from_keyword(_input_data, start_keyword)
+
         _start_date = start_date if start_date is not None else dt.date.today()
         _end_date = dt.date(_start_date.year, _start_date.month-1, _start_date.day-1) if end_date is None else dt.date(end_date.year, end_date.month, end_date.day-1)
         
@@ -94,30 +119,60 @@ class link_getter :
 
         for key in _input_data:
             print(f"{key} started") #print log. Erase it if you don't want any log
-            self._trip_per_date(key, _base_url, _start_date, _end_date, _total_page, _selector, file_name)
+            self._trip_per_date(key, _base_url, _start_date, _end_date, _toal_page_num, _selector, file_name)
             print(f"{key} ended") #print log. Erase it if you don't want any log
          
         return self.output_data
     
 
-    def _trip_per_date(self, key, _base_url, _start_date, _end_date, _total_page, _selector, file_name) :
+    def _trip_per_date(self, key, _base_url, _start_date, _end_date, _toal_page_num, _selector, file_name) :
         cur_date = _start_date
+        date_cnt = 0
+        page_cnt = 0
         while(cur_date != _end_date) :
                 prev_date = cur_date - dt.timedelta(days = 1)
-                for page in range(_total_page):
+                date_cnt += 1
+                for page in range(_toal_page_num):
+                    page_cnt += 1
                     try : 
                         time.sleep(random.randrange(35, 55) / 100)
-                        cur_url =  self._create_url(_base_url, key, page, '&sort=1', '&pd=3', f'&ds={cur_date.strftime("%Y.%m.%d")}', f'&de={cur_date.strftime("%Y.%m.%d")}') 
-                        html = self.tor_handler.open_url(cur_url)
+                        url =  self._create_url(_base_url, key, page, 
+                                                    '&sort=1', '&pd=3', 
+                                                    f'&ds={cur_date.strftime("%Y.%m.%d")}', 
+                                                    f'&de={cur_date.strftime("%Y.%m.%d")}') 
+                        html = self.tor_handler.open_url(url)
                         soup = BeautifulSoup(html, 'html.parser')
-                        print(cur_url) #print log. Erase it if you don't want any log
-                        self._put_link_from_page_to_list(soup, _selector)
+                        print(f'Your current ip : {self.tor_handler.get_cur_ip().strip()}')
+                        print(url) #print log. Erase it if you don't want any log
+
+                        if date_cnt >= random.randrange(5, 8) or page_cnt >= random.randrange(10, 16) :
+                            print("Random IP change")
+                            print(f'Your new ip : {self.tor_handler.get_new_ip(2)}')
+                            
+                            date_cnt = 0
+                            page_cnt = 0
+                
+                        self._put_link_from_page_to_list(soup.select(_selector))
+                        
                     except HTTPError as hp:
                         print(hp)
                         if hp.__str__() == 'HTTP Error 403: Forbidden' :
-                            print("You're currently blocked")
-                            raise hp
-                        return None
+                            while True :
+                                try : 
+                                    print("You're currently blocked")
+                                    print(f'Your new ip : {self.tor_handler.get_new_ip(2)}')
+                                    html = self.tor_handler.open_url(url)
+                                    soup = BeautifulSoup(html, 'html.parser')
+                                    self._put_link_from_page_to_list(soup.select(_selector))
+                                except Exception as e:
+                                    if e.__str__() == 'HTTP Error 403: Forbidden' :
+                                        continue
+                                    else :
+                                        print(e)
+                                finally :
+                                    break
+                        else :
+                            break
                     except URLError as ue:
                         print('wrong url')
                         print(ue)
@@ -132,9 +187,9 @@ class link_getter :
                     
                 self._data_to_json(file_name)
                 cur_date = prev_date
+
     
-    def _put_link_from_page_to_list(self, soup, selector) :
-        selected = soup.select(selector)
+    def _put_link_from_page_to_list(self, selected) :
         if len(selected) == 0 :
             raise NoDataException('No more data found in this day')
         for elem in selected:
@@ -143,14 +198,34 @@ class link_getter :
                 continue
             self.total_cnt += 1
             link = elem['href']
+            if link in self.output_data_content :
+                continue
+            self.output_data_content.append(link)
             dictionary = {f'{self.total_cnt}' : link}
             self.output_data.append(dictionary)
+            
         
     def _create_url(self, url : str, key : str, page_num : int, *args : str) :
         params = ''
         for idx, arg in enumerate(args):
             params += arg
         return url + quote(key) + "&start=" + str(page_num * 10 + 1) + params
+    
+    def _slice_data_from_keyword(self, data, keyword) :
+        cnt = 0
+        _data = []
+        for _keyword in data :
+            if _keyword == keyword :
+                _data = data[cnt:]
+                return _data
+            cnt += 1
+        print("The keyword you set doesn't exist")
+
+    def _get_data_content(self) :
+        if(len(self.output_data) == 0) :
+            return None
+        for _dict in self.output_data :
+            self.output_data_content.append(list(_dict.values())[0])
     
 
     def _data_to_json(self, file_name : str) :
@@ -173,14 +248,14 @@ class link_getter :
             except IOError as fn :
                 print(fn)
                 print('No file found. Use Default Dataset.')
+                self.init_json([], 0)
             except NoDataException as fn :
                 print(fn)
                 print('No data found in the file. Use Default Dataset.')
-            finally :
                 self.init_json([], 0)
         else :
             self.init_json([], 0)
 
 
 lg = link_getter()
-lg.link_to_json('to_Jinwoongdd.json', False)
+lg.link_to_json('data_crawling.json', True, start_keyword = '(주)동광에스디')
